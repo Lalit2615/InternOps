@@ -1,4 +1,4 @@
-﻿const pool = require('../../config/db');
+const pool = require('../../config/db');
 
 async function markAttendance(userId, markedBy, date, status, remarks) {
   const res = await pool.query(
@@ -17,20 +17,20 @@ async function getAttendance(userId, { from, to, page = 1, limit = 30 } = {}) {
   const safePage = Math.max(parseInt(page, 10) || 1, 1);
   const offset = (safePage - 1) * safeLimit;
 
-  const where = ['user_id=$1', 'deleted_at IS NULL'];
+  const where = ['a.user_id=$1', 'a.deleted_at IS NULL'];
   const params = [userId];
   if (from) {
     params.push(from);
-    where.push(`date >= $${params.length}`);
+    where.push(`a.date >= $${params.length}`);
   }
   if (to) {
     params.push(to);
-    where.push(`date <= $${params.length}`);
+    where.push(`a.date <= $${params.length}`);
   }
   const whereClause = where.join(' AND ');
 
   const countRes = await pool.query(
-    `SELECT COUNT(*)::int AS total FROM attendance WHERE ${whereClause}`,
+    `SELECT COUNT(*)::int AS total FROM attendance a WHERE ${whereClause}`,
     params
   );
   const total = countRes.rows[0].total;

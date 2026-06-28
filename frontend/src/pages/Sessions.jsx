@@ -86,7 +86,10 @@ export default function Sessions() {
                     : new Date(s.createdAt).toLocaleString()}
                 </p>
                 <p className="text-xs text-gray-400">
-                  Expires {new Date(s.expiresAt).toLocaleDateString()}
+                  Expires:{' '}
+                  {s.expiresAt && !isNaN(new Date(s.expiresAt).getTime())
+                    ? new Date(s.expiresAt).toLocaleDateString()
+                    : 'N/A'}
                 </p>
               </div>
               <Btn
