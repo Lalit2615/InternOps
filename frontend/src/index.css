@@ -131,8 +131,12 @@ html.dark body {
 .dark .bg-purple-50 {
   background-color: rgba(168, 85, 247, 0.15) !important;
 }
-.dark .bg-rose-50 {
+.dark .bg-rose-50,
+.dark .bg-red-50 {
   background-color: rgba(244, 63, 94, 0.15) !important;
+}
+.dark .bg-blue-50 {
+  background-color: rgba(59, 130, 246, 0.15) !important;
 }
 .dark .text-indigo-700 {
   color: #a5b4fc !important;
@@ -147,3 +151,25 @@ html.dark body {
 .dark .text-purple-700 {
   color: #d8b4fe !important;
 }
+.dark .text-red-700,
+.dark .text-red-800,
+.dark .text-rose-700,
+.dark .text-rose-800 {
+  color: #fda4af !important;
+}
+.dark .text-blue-700,
+.dark .text-blue-800 {
+  color: #93c5fd !important;
+}
+.dark .border-red-200,
+.dark .border-rose-200 {
+  border-color: rgba(244, 63, 94, 0.3) !important;
+}
+.dark .border-green-200,
+.dark .border-emerald-200 {
+  border-color: rgba(16, 185, 129, 0.3) !important;
+}
+.dark .border-blue-200 {
+  border-color: rgba(59, 130, 246, 0.3) !important;
+}
+
