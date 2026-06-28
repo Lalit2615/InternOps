@@ -246,17 +246,24 @@ async function routes(fastify) {
         });
       }
 
-      const after = await repo.updateMemberRole(req.params.id, role);
-      await createAuditLog({
-        userId: req.user.id,
-        action: 'MEMBER_ROLE_CHANGED',
-        resourceType: 'user',
-        resourceId: req.params.id,
-        oldValue: { role: before.role },
-        newValue: { role: after.role },
-        ...extractRequestInfo(req),
-      });
-      return after;
+      try {
+        const after = await repo.updateMemberRole(req.params.id, role);
+        await createAuditLog({
+          userId: req.user.id,
+          action: 'MEMBER_ROLE_CHANGED',
+          resourceType: 'user',
+          resourceId: req.params.id,
+          oldValue: { role: before.role },
+          newValue: { role: after.role },
+          ...extractRequestInfo(req),
+        });
+        return after;
+      } catch (err) {
+        if (err.message.includes('outrank') || err.message.includes('not found')) {
+          return reply.status(400).send({ error: err.message });
+        }
+        throw err;
+      }
     }
   );
 
@@ -313,17 +320,28 @@ async function routes(fastify) {
           .send({ error: 'That assignment would create a cycle' });
       }
 
-      const after = await repo.updateMemberManager(req.params.id, manager_id);
-      await createAuditLog({
-        userId: req.user.id,
-        action: 'MEMBER_MANAGER_CHANGED',
-        resourceType: 'user',
-        resourceId: req.params.id,
-        oldValue: { manager_id: member.manager_id },
-        newValue: { manager_id },
-        ...extractRequestInfo(req),
-      });
-      return after;
+      try {
+        const after = await repo.updateMemberManager(req.params.id, manager_id);
+        await createAuditLog({
+          userId: req.user.id,
+          action: 'MEMBER_MANAGER_CHANGED',
+          resourceType: 'user',
+          resourceId: req.params.id,
+          oldValue: { manager_id: member.manager_id },
+          newValue: { manager_id },
+          ...extractRequestInfo(req),
+        });
+        return after;
+      } catch (err) {
+        if (
+          err.message.includes('cycle') ||
+          err.message.includes('outrank') ||
+          err.message.includes('not found')
+        ) {
+          return reply.status(400).send({ error: err.message });
+        }
+        throw err;
+      }
     }
   );
 }

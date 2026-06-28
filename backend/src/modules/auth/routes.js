@@ -3,12 +3,13 @@ const { z } = require('zod');
 const rbac = require('../../middleware/rbac');
 const { bruteForceCheck } = require('../../middleware/bruteForce');
 const auth = require('../../middleware/auth');
-const { extractRequestInfo } = require('../../utils/audit');
+const audit = require('../../utils/audit');
 const { generateToken } = require('../../middleware/csrf');
 const { verifyEmail, sendVerificationEmail } = require('./verificationService');
 const repo = require('./repository');
 const { forgotPassword, resetPassword } = require('./resetService');
 const isProduction = process.env.NODE_ENV === 'production';
+
 async function routes(fastify) {
   // Register
   fastify.post(
@@ -35,6 +36,60 @@ async function routes(fastify) {
     }
   );
 
+  // Bulk Register
+  fastify.post(
+    '/register/bulk',
+    {
+      preHandler: [auth, rbac('ADMIN')],
+      schema: {
+        tags: ['Authentication'],
+        description: 'Bulk register users (Admin only)',
+      },
+    },
+    async (req, reply) => {
+      const userSchema = z.object({
+        email: z.string().email(),
+        password: z.string().min(8),
+        role: z.enum(['ADMIN', 'SENIOR_TL', 'TL', 'CAPTAIN', 'INTERN']),
+        managerId: z.string().uuid().optional(),
+        departmentId: z.string().uuid().optional(),
+        fullName: z.string().optional(),
+      });
+      const schema = z.object({ users: z.array(userSchema).min(1).max(100) });
+      const { users } = schema.parse(req.body);
+
+      const results = { success: [], failed: [] };
+      const ROLE_HIERARCHY = ['INTERN', 'CAPTAIN', 'TL', 'SENIOR_TL', 'ADMIN'];
+      for (const userData of users) {
+        const callerLevel = ROLE_HIERARCHY.indexOf(req.user.role);
+        const targetLevel = ROLE_HIERARCHY.indexOf(userData.role);
+        if (targetLevel >= callerLevel) {
+          results.failed.push({
+            email: userData.email,
+            error: 'Cannot assign a role equal to or higher than your own.',
+          });
+          continue;
+        }
+        try {
+          const user = await service.register(userData, req.user);
+          results.success.push({ email: userData.email, id: user.id });
+        } catch (err) {
+          req.log.error(
+            { email: userData.email, err },
+            'Bulk register failed for user'
+          );
+          const safeMessage = err.message?.includes('duplicate')
+            ? 'Email already exists.'
+            : err.message?.includes('manager')
+              ? 'Invalid manager ID.'
+              : 'Failed to create user.';
+          results.failed.push({ email: userData.email, error: safeMessage });
+        }
+      }
+      return reply.status(207).send(results);
+    }
+  );
+
   // Login
   fastify.post(
     '/login',
@@ -49,22 +104,41 @@ async function routes(fastify) {
       const { email, password } = z
         .object({ email: z.string().email(), password: z.string() })
         .parse(req.body);
-      const result = await service.login(
-        email,
-        password,
-        req.ip,
-        req.headers['user-agent']
-      );
+      const userAgent = req.headers['user-agent'];
+      const result = await service.login(email, password, req.ip, userAgent);
       reply.setCookie('refreshToken', result.refreshToken, {
         httpOnly: true,
         secure: isProduction,
         sameSite: 'strict',
         path: '/api/auth/refresh',
       });
-      return {
+
+      req.auditOnResponse = {
+        userId: result.user.id,
+        action: 'LOGIN',
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      };
+
+      const response = {
         accessToken: result.accessToken,
         user: result.user,
       };
+
+      reply.send(response);
+
+      req.log.info(
+        { action: 'LOGIN', userId: result.user.id, ip: req.ip, userAgent },
+        'login success'
+      );
+      audit
+        .createAuditLog({
+          userId: result.user.id,
+          action: 'LOGIN',
+          ipAddress: req.ip,
+          userAgent,
+        })
+        .catch((err) => req.log.error(err, 'audit log failed'));
     }
   );
 
@@ -75,7 +149,7 @@ async function routes(fastify) {
       schema: { tags: ['Authentication'], description: 'Refresh access token' },
     },
     async (req, reply) => {
-      const token = req.cookies.refreshToken || req.body.refreshToken;
+      const token = req.cookies.refreshToken;
       if (!token)
         return reply.status(400).send({ error: 'Refresh token required' });
       const tokens = await service.refreshTokens(token, req.ip);
@@ -116,18 +190,23 @@ async function routes(fastify) {
       );
 
       reply.clearCookie('refreshToken', { path: '/api/auth/refresh' });
+
+      req.auditOnResponse = {
+        userId: req.user.id,
+        action: 'LOGOUT',
+        ipAddress: req.ip,
+        userAgent: req.headers['user-agent'],
+      };
+
+      reply.clearCookie('csrf-sid', { path: '/' });
+      reply.clearCookie('csrf-token', { path: '/' });
       return { message: 'Logged out' };
     }
   );
 
   // Get CSRF token
   fastify.get('/csrf-token', async (req, reply) => {
-    const { generateToken } = require('../../middleware/csrf');
     const csrfToken = generateToken(req, reply);
-    // Also expose the token in a non-HttpOnly cookie so the SPA can
-    // echo it in the X-CSRF-Token header on mutation requests. The
-    // actual validation is bound to the signed session cookie, not this
-    // readable one.
     reply.setCookie('csrf-token', csrfToken, {
       httpOnly: false,
       secure: isProduction,
@@ -159,7 +238,7 @@ async function routes(fastify) {
   // Forgot password
   fastify.post('/forgot-password', async (req, reply) => {
     const { email } = z.object({ email: z.string().email() }).parse(req.body);
-    await forgotPassword(email, extractRequestInfo(req));
+    await forgotPassword(email, audit.extractRequestInfo(req));
     return { message: 'If that email exists, a reset link has been sent.' };
   });
 
@@ -168,7 +247,7 @@ async function routes(fastify) {
     const { token, newPassword } = z
       .object({ token: z.string(), newPassword: z.string().min(8) })
       .parse(req.body);
-    await resetPassword(token, newPassword, extractRequestInfo(req));
+    await resetPassword(token, newPassword, audit.extractRequestInfo(req));
     return {
       message:
         'Password reset successful. Please log in with your new password.',
